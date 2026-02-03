@@ -1,0 +1,331 @@
+# app.py
+
+import streamlit as st
+import matplotlib.pyplot as plt
+import pandas as pd
+import altair as alt
+
+from data_loader import load_merged_data
+from features import filter_item, make_ml_dataset
+from models import train_random_forest
+
+# -------------------------------------------------------------------------
+# 0. 페이지 설정 & 세션 초기화
+# -------------------------------------------------------------------------
+st.set_page_config(
+	page_title="디지털 자산 시세 변동 예측 모델",
+	layout="wide"
+)
+
+if "rf_result" not in st.session_state:
+	st.session_state.rf_result = None
+
+st.title("디지털 자산 시세 변동 예측 모델")
+st.caption("로스트아크 거래소 아이템 시세 예측 (RandomForest 예시 버전)")
+
+# -------------------------------------------------------------------------
+# 1. 사이드바 - 검색/학습 설정 (폼 + Enter 제출)
+# -------------------------------------------------------------------------
+with st.sidebar:
+	st.header("검색 / 학습 설정")
+
+	df_final = load_merged_data()
+
+	grade_list = sorted(df_final["grade"].dropna().unique())
+	grade_options = ["전체"] + grade_list
+
+	with st.form("search_form"):
+		target_grade = st.selectbox(
+			"아이템 등급",
+			grade_options,
+			index=grade_options.index("유물") if "유물" in grade_options else 0
+		)
+
+		target_keyword = st.text_input(
+			"아이템 이름 키워드",
+			value="원한"
+		)
+
+		# zoom_n = st.slider(
+		# 	"확대해서 볼 최근 데이터 개수(테스트 구간)",
+		# 	min_value=100,
+		# 	max_value=2000,
+		# 	value=500,
+		# 	step=100
+		# )
+		
+		days_to_show = st.slider(
+            "최근 예측 기간 (일)",
+            min_value=1,
+            max_value=14,
+            value=3,
+            step=1
+        )
+		POINTS_PER_DAY = 144  # 10분 단위 기준
+		
+		zoom_n = days_to_show * POINTS_PER_DAY
+		
+		run_button = st.form_submit_button("RandomForest 학습 & 예측 실행")
+
+# -------------------------------------------------------------------------
+# 2. 버튼 눌렀을 때만 새로 계산 → 세션에 저장
+# -------------------------------------------------------------------------
+if run_button:
+	with st.spinner("데이터 필터링 중..."):
+		result = filter_item(df_final, target_keyword, target_grade)
+
+	if result is None:
+		st.error(f"'{target_keyword}' (등급: {target_grade}) 에 해당하는 데이터가 없습니다.")
+	else:
+		df_target, top_item = result
+
+		with st.spinner("Feature Engineering 처리 중..."):
+			df_ml, features = make_ml_dataset(df_target)
+
+		if len(df_ml) < 300:
+			st.warning(f"Feature 생성 후 데이터가 {len(df_ml)}개입니다. (최소 300개 이상일 때가 더 안정적)")
+		else:
+			with st.spinner("RandomForest 학습 및 예측 중..."):
+				model, y_test, y_pred, split_idx, rmse, r2 = train_random_forest(df_ml, features)
+
+			st.session_state.rf_result = {
+				"df_target": df_target,
+				"df_ml": df_ml,
+				"top_item": top_item,
+				"y_test": y_test,
+				"y_pred": y_pred,
+				"split_idx": split_idx,
+				"rmse": rmse,
+				"r2": r2,
+				# "zoom_n": zoom_n,
+				"days_to_show": days_to_show,
+			}
+
+# -------------------------------------------------------------------------
+# 3. 세션에 결과 없으면 안내 후 종료
+# -------------------------------------------------------------------------
+if st.session_state.rf_result is None:
+	st.info("왼쪽에서 등급/키워드 설정 후 **[RandomForest 학습 & 예측 실행]** 버튼 또는 Enter 를 눌러줘.")
+	st.stop()
+
+# -------------------------------------------------------------------------
+# 4. 세션에서 결과 꺼내서 화면에 표시
+# -------------------------------------------------------------------------
+res = st.session_state.rf_result
+
+df_target = res["df_target"]
+df_ml = res["df_ml"]
+top_item = res["top_item"]
+y_test = res["y_test"]
+y_pred = res["y_pred"]
+split_idx = res["split_idx"]
+rmse = res["rmse"]
+r2 = res["r2"]
+# zoom_n = res["zoom_n"]
+days_to_show = res["days_to_show"]
+zoom_n = days_to_show * 144
+
+st.subheader(f"🎯 분석 대상: {top_item}")
+col1, col2 = st.columns(2)
+with col1:
+	st.metric("RMSE (골드)", f"{rmse:,.2f}")
+with col2:
+	st.metric("R²", f"{r2:.3f}")
+
+# -------------------------------------------------------------------------
+# 5. 시각화 1: 테스트 구간 확대
+# -------------------------------------------------------------------------
+
+st.markdown("### 📈 최근 테스트 구간 확대 그래프 (인터랙티브)")
+
+test_dates = df_ml["date"].iloc[split_idx:]
+
+if zoom_n > len(test_dates):
+	zoom_n = len(test_dates)
+
+zoom_slice = slice(-zoom_n, None)
+
+# Altair용 데이터프레임 구성
+df_plot = pd.DataFrame({
+	"date": test_dates.iloc[zoom_slice],
+	"Actual (실제)": y_test.iloc[zoom_slice].values,
+	"Prediction (예측)": y_pred[zoom_slice]
+})
+
+# wide → long 형태로 변환 (Altair는 보통 long 형태가 편함)
+df_plot_melt = df_plot.melt("date", var_name="type", value_name="price")
+
+# 초기 y축 범위 계산 (최근 구간 기준)
+y_min = df_plot_melt["price"].min()
+y_max = df_plot_melt["price"].max()
+
+# 여유 마진 (2% 정도)
+padding = (y_max - y_min) * 0.05
+
+y_domain = [y_min - padding, y_max + padding]
+
+# 인터랙티브 라인 차트
+chart = (
+	alt.Chart(df_plot_melt)
+	.mark_line()
+	.encode(
+		x=alt.X("date:T", title="시간"),
+		y=alt.Y(
+			"price:Q",
+			title="가격 (Gold)",
+			scale=alt.Scale(domain=y_domain)  # ✅ 핵심
+		),
+		color=alt.Color("type:N", title="구분"),
+		tooltip=[
+			alt.Tooltip("date:T", title="시간"),
+			alt.Tooltip("type:N", title="구분"),
+			alt.Tooltip("price:Q", title="가격"),
+		],
+	)
+	.properties(
+		# title=f"[{top_item}] 최근 테스트 구간 시세 예측 (RandomForest)"
+		title=f"[{top_item}] 최근 {days_to_show}일 시세 예측 (RandomForest)"
+	)
+	.interactive()
+)
+
+st.altair_chart(chart, use_container_width=True)
+
+
+# -------------------------------------------------------------------------
+# 6. 시각화 2: 전체 + 수요일 하이라이트
+# -------------------------------------------------------------------------
+st.markdown("### 📊 전체 시세 & 수요일(Reset) 하이라이트 (인터랙티브)")
+
+all_dates = df_ml["date"]
+all_prices = df_ml["price"]
+
+# ---------------------------
+# 1) 라인 차트용 데이터 준비
+# ---------------------------
+# (A) 전체 흐름
+df_line_all = pd.DataFrame({
+	"date": all_dates,
+	"price": all_prices,
+	"type": "History (전체 흐름)"
+})
+
+# (B) 테스트 구간 실제
+test_dates_full = all_dates.iloc[split_idx:]
+real_test_price = all_prices.iloc[split_idx:]
+
+df_line_test = pd.DataFrame({
+	"date": test_dates_full,
+	"price": real_test_price,
+	"type": "Actual (검증 구간)"
+})
+
+# (C) 테스트 구간 예측
+df_line_pred = pd.DataFrame({
+	"date": test_dates_full,
+	"price": y_pred,
+	"type": "Prediction (예측)"
+})
+
+# 하나로 합치기
+df_lines = pd.concat([df_line_all, df_line_test, df_line_pred], ignore_index=True)
+
+# ---------------------------
+# 2) 수요일(Reset) 배경 영역 데이터
+# ---------------------------
+unique_days = df_ml["date"].dt.normalize().drop_duplicates()
+weds = unique_days[unique_days.dt.dayofweek == 2]  # 0:월, 1:화, 2:수, ...
+
+df_weds = pd.DataFrame({
+	"start": weds,
+	"end": weds + pd.Timedelta(days=1),
+	"label": "수요일 (Reset)"
+})
+
+# ---------------------------
+# 3) 학습/예측 분기점 세로선 데이터
+# ---------------------------
+split_time = all_dates.iloc[split_idx]
+df_split = pd.DataFrame({"date": [split_time]})
+
+
+# -------------------------------------------------
+# 4) y축 초기 배율 계산 – 전체 시세 기준
+# -------------------------------------------------
+y_all_min = all_prices.min()
+y_all_max = all_prices.max()
+
+padding = (y_all_max - y_all_min) * 0.05  # 5% 여유
+y_domain = [y_all_min - padding, y_all_max + padding]
+
+
+# ---------------------------
+# 5) Altair 레이어 구성
+# ---------------------------
+import altair as alt
+
+# (배경) 수요일 영역
+rect = (
+	alt.Chart(df_weds)
+	.mark_rect()
+	.encode(
+		x="start:T",
+		x2="end:T",
+		color=alt.value("orange"),
+		opacity=alt.value(0.12)
+	)
+)
+
+
+lines = (
+	alt.Chart(df_lines)
+	.mark_line()
+	.encode(
+		x=alt.X("date:T", title="날짜"),
+		y=alt.Y(
+			"price:Q",
+			title="가격 (Gold)",
+			scale=alt.Scale(domain=y_domain)
+		),
+		color=alt.Color("type:N", title="구분"),
+		tooltip=[
+			alt.Tooltip("date:T", title="날짜"),
+			alt.Tooltip("type:N", title="구분"),
+			alt.Tooltip("price:Q", title="가격"),
+		],
+	)
+)
+
+
+# (rule) 학습/예측 분기점
+rule = (
+	alt.Chart(df_split)
+	.mark_rule(color="green", strokeDash=[4, 4])
+	.encode(
+		x="date:T",
+		size=alt.value(2)
+	)
+)
+
+chart_all = (
+	(rect + lines + rule)
+	.properties(
+		title=f"[{top_item}] 전체 시세 & 수요일(Reset) 영향 분석 (RandomForest)",
+		height=400
+	)
+	.interactive()  # 줌/팬/호버 가능
+)
+
+st.altair_chart(chart_all, use_container_width=True)
+
+
+
+# -------------------------------------------------------------------------
+# 7. 원시 데이터 보기
+# -------------------------------------------------------------------------
+with st.expander("원시 데이터 / Feature 데이터 확인"):
+	st.markdown("#### 🔹 원본 타겟 데이터 (df_target)")
+	st.dataframe(df_target[["date", "name", "grade", "price"]].tail(50))
+
+	st.markdown("#### 🔹 ML 학습용 데이터 (df_ml)")
+	st.dataframe(df_ml[["date", "price", "lag_10m", "rsi", "is_overbought", "is_oversold"]].tail(50))

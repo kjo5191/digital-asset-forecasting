@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# 가상환경
+venv/
+
+# 기타
+.env
+.DS_Store
