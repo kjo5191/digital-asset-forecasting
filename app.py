@@ -8,6 +8,7 @@ import altair as alt
 from data_loader import load_merged_data
 from features import filter_item, make_ml_dataset
 from models import train_random_forest
+from backtest import simulate_strict_investor
 
 # -------------------------------------------------------------------------
 # 0. 페이지 설정 & 세션 초기화
@@ -45,27 +46,54 @@ with st.sidebar:
 			"아이템 이름 키워드",
 			value="원한"
 		)
-
-		# zoom_n = st.slider(
-		# 	"확대해서 볼 최근 데이터 개수(테스트 구간)",
-		# 	min_value=100,
-		# 	max_value=2000,
-		# 	value=500,
-		# 	step=100
-		# )
 		
 		days_to_show = st.slider(
-            "최근 예측 기간 (일)",
-            min_value=1,
-            max_value=14,
-            value=3,
-            step=1
-        )
+			"최근 예측 기간 (일)",
+			min_value=1,
+			max_value=14,
+			value=3,
+			step=1
+		)
 		POINTS_PER_DAY = 144  # 10분 단위 기준
 		
 		zoom_n = days_to_show * POINTS_PER_DAY
 		
 		run_button = st.form_submit_button("RandomForest 학습 & 예측 실행")
+
+	st.sidebar.subheader("🧪 투자자 시뮬레이션")
+
+	enable_investor_mode = st.sidebar.checkbox("깐깐한 투자자 시뮬레이션", value=False)
+
+	initial_balance = st.sidebar.number_input(
+		"초기 투자금 (G)",
+		min_value=1_000_000,
+		max_value=100_000_000,
+		value=10_000_000,
+		step=1_000_000,
+	)
+
+	max_inventory = st.sidebar.slider(
+		"최대 보유 개수",
+		min_value=1,
+		max_value=20,
+		value=5,
+	)
+
+	target_margin = st.sidebar.slider(
+		"매수 기준 기대 수익률 (%)",
+		min_value=1,
+		max_value=30,
+		value=10,
+	) / 100.0
+
+	fee_rate = st.sidebar.slider(
+		"거래 수수료율 (%)",
+		min_value=0.0,
+		max_value=10.0,
+		value=5.0,
+		step=0.5,
+	) / 100.0
+
 
 # -------------------------------------------------------------------------
 # 2. 버튼 눌렀을 때만 새로 계산 → 세션에 저장
@@ -262,7 +290,6 @@ y_domain = [y_all_min - padding, y_all_max + padding]
 # ---------------------------
 # 5) Altair 레이어 구성
 # ---------------------------
-import altair as alt
 
 # (배경) 수요일 영역
 rect = (
@@ -319,6 +346,34 @@ chart_all = (
 st.altair_chart(chart_all, use_container_width=True)
 
 
+# # 투자자 모드 (오류 못고쳐서 임시 주석처리)
+# # 예측 결과가 y_test, y_pred, test_dates 라고 가정
+
+# if enable_investor_mode:
+# 	st.subheader("💼 깐깐한 투자자 모드 결과")
+
+# 	if st.button("가상 투자 시뮬레이션 실행"):
+# 		result = simulate_strict_investor(
+# 			test_dates=test_dates,
+# 			y_test=y_test,
+# 			y_pred=y_pred,
+# 			initial_balance=initial_balance,
+# 			fee_rate=fee_rate,
+# 			max_inventory=max_inventory,
+# 			target_margin=target_margin,
+# 		)
+
+# 		# 🔍 디버깅은 반드시 이 안에서만!
+# 		st.write("DEBUG result:", result)
+# 		st.write("DEBUG net_profit:", result.get("net_profit"), type(result.get("net_profit")))
+
+# 		# 아래는 잠깐 주석 처리해도 됨 (에러 나면)
+# 		# st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
+# 		# st.metric("순수익", f"{result['net_profit']:,+.0f} G")
+# 		# st.metric("수익률 (ROI)", f"{result['roi']:+.2f} %")
+
+
+
 
 # -------------------------------------------------------------------------
 # 7. 원시 데이터 보기
@@ -329,3 +384,4 @@ with st.expander("원시 데이터 / Feature 데이터 확인"):
 
 	st.markdown("#### 🔹 ML 학습용 데이터 (df_ml)")
 	st.dataframe(df_ml[["date", "price", "lag_10m", "rsi", "is_overbought", "is_oversold"]].tail(50))
+
