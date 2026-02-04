@@ -1,18 +1,21 @@
 # models/factory.py
 
 from .random_forest_model import RandomForestPriceModel
+from .lightgbm_model import LightGBMPriceModel
+# 앞으로 LSTM, Prophet 추가 예정
+
+_MODEL_REGISTRY = {
+	"rf": RandomForestPriceModel,
+	"lgbm": LightGBMPriceModel,
+	# "lstm": LSTMPriceModel,
+	# "prophet": ProphetPriceModel,
+}
 
 
 def get_model(model_name: str):
-	if model_name == "rf":
-		return RandomForestPriceModel()
-
-	# 추후 확장
-	# elif model_name == "lstm":
-	#	return LSTMPriceModel()
-
-	# elif model_name == "ensemble":
-	#	return EnsemblePriceModel()
-
-	else:
+	try:
+		model_class = _MODEL_REGISTRY[model_name]
+	except KeyError:
 		raise ValueError(f"Unknown model: {model_name}")
+
+	return model_class()
