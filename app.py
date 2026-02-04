@@ -346,31 +346,29 @@ chart_all = (
 st.altair_chart(chart_all, use_container_width=True)
 
 
-# # 투자자 모드 (오류 못고쳐서 임시 주석처리)
-# # 예측 결과가 y_test, y_pred, test_dates 라고 가정
+# 투자자 모드
 
-# if enable_investor_mode:
-# 	st.subheader("💼 깐깐한 투자자 모드 결과")
+if enable_investor_mode:
+	st.subheader("💼 깐깐한 투자자 모드 결과")
 
-# 	if st.button("가상 투자 시뮬레이션 실행"):
-# 		result = simulate_strict_investor(
-# 			test_dates=test_dates,
-# 			y_test=y_test,
-# 			y_pred=y_pred,
-# 			initial_balance=initial_balance,
-# 			fee_rate=fee_rate,
-# 			max_inventory=max_inventory,
-# 			target_margin=target_margin,
-# 		)
+	if st.button("가상 투자 시뮬레이션 실행"):
+		result = simulate_strict_investor(
+			test_dates=test_dates,
+			y_test=y_test,
+			y_pred=y_pred,
+			initial_balance=initial_balance,
+			fee_rate=fee_rate,
+			max_inventory=max_inventory,
+			target_margin=target_margin,
+		)
 
-# 		# 🔍 디버깅은 반드시 이 안에서만!
-# 		st.write("DEBUG result:", result)
-# 		st.write("DEBUG net_profit:", result.get("net_profit"), type(result.get("net_profit")))
+		st.metric("순수익", f"{result['net_profit']:+,.0f} G")
+		st.metric("수익률 (ROI)", f"{result['roi']:+,.2f} %")
+		st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
 
-# 		# 아래는 잠깐 주석 처리해도 됨 (에러 나면)
-# 		# st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
-# 		# st.metric("순수익", f"{result['net_profit']:,+.0f} G")
-# 		# st.metric("수익률 (ROI)", f"{result['roi']:+.2f} %")
+		# 디버깅용 코드
+		# st.write("DEBUG result:", result)
+		# st.write("DEBUG net_profit:", result.get("net_profit"), type(result.get("net_profit")))
 
 
 
