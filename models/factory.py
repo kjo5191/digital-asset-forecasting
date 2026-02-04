@@ -2,12 +2,12 @@
 
 from .random_forest_model import RandomForestPriceModel
 from .lightgbm_model import LightGBMPriceModel
-# 앞으로 LSTM, Prophet 추가 예정
+from .lstm_model import LSTMPriceModel
 
 _MODEL_REGISTRY = {
 	"rf": RandomForestPriceModel,
 	"lgbm": LightGBMPriceModel,
-	# "lstm": LSTMPriceModel,
+	"lstm": LSTMPriceModel,
 	# "prophet": ProphetPriceModel,
 }
 

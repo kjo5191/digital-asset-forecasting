@@ -61,41 +61,6 @@ with st.sidebar:
 		
 		run_button = st.form_submit_button("학습 & 예측 실행")
 
-	# 페이지 분리 하면서 주석처리함.
-	# st.sidebar.subheader("🧪 투자자 시뮬레이션")
-
-	# enable_investor_mode = st.sidebar.checkbox("깐깐한 투자자 시뮬레이션", value=False)
-
-	# initial_balance = st.sidebar.number_input(
-	# 	"초기 투자금 (G)",
-	# 	min_value=1_000_000,
-	# 	max_value=100_000_000,
-	# 	value=10_000_000,
-	# 	step=1_000_000,
-	# )
-
-	# max_inventory = st.sidebar.slider(
-	# 	"최대 보유 개수",
-	# 	min_value=1,
-	# 	max_value=20,
-	# 	value=5,
-	# )
-
-	# target_margin = st.sidebar.slider(
-	# 	"매수 기준 기대 수익률 (%)",
-	# 	min_value=1,
-	# 	max_value=30,
-	# 	value=10,
-	# ) / 100.0
-
-	# fee_rate = st.sidebar.slider(
-	# 	"거래 수수료율 (%)",
-	# 	min_value=0.0,
-	# 	max_value=10.0,
-	# 	value=5.0,
-	# 	step=0.5,
-	# ) / 100.0
-
 
 # -------------------------------------------------------------------------
 # 2. 버튼 눌렀을 때만 새로 계산 → 세션에 저장
@@ -122,11 +87,24 @@ if run_button:
 				# future_steps = 144
 				# future_df = forecast_future(model, df_ml, features, steps=future_steps)
 
-				price_model = get_model("rf")	# 나중에 "ensemble" 로만 바꾸면 됨
+				model_key = st.sidebar.selectbox(
+					"모델 선택",
+					["rf", "lgbm", "lstm"],
+					format_func=lambda k: {
+						"rf": "RandomForest",
+						"lgbm": "LightGBM",
+						"lstm": "LSTM",
+					}[k],
+				)
+				price_model = get_model(model_key)
 				price_model.train(df_ml, features)
 
 				y_test, y_pred, split_idx, rmse, r2 = price_model.predict_test()
-				future_df = price_model.predict_future(steps=144)
+				# future_df = price_model.predict_future(steps=144)
+				try:
+					future_df = price_model.predict_future(steps=144)
+				except NotImplementedError:
+					future_df = None
 
 			st.session_state.rf_result = {
 				"df_target": df_target,
@@ -437,6 +415,7 @@ st.altair_chart(chart_future, use_container_width=True)
 # 		st.metric("순수익", f"{result['net_profit']:+,.0f} G")
 # 		st.metric("수익률 (ROI)", f"{result['roi']:+,.2f} %")
 # 		st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
+
 
 # -------------------------------------------------------------------------
 # 8. 원시 데이터 보기
