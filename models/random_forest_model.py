@@ -1,4 +1,4 @@
-# models/rf_model.py
+# models/random_forest_model.py
 
 import numpy as np
 import pandas as pd

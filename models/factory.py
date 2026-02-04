@@ -1,6 +1,6 @@
 # models/factory.py
 
-from .rf_model import RandomForestPriceModel
+from .random_forest_model import RandomForestPriceModel
 
 
 def get_model(model_name: str):
