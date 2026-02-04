@@ -199,6 +199,24 @@ with col2:
 	st.metric("R²", f"{r2:.3f}")
 
 
+# -----------------------------------------------------------------
+# 투자자 시뮬레이션 페이지로 이동 링크
+# -----------------------------------------------------------------
+st.markdown("### 💼 투자자 시뮬레이션")
+
+st.caption(
+	"현재 분석한 아이템과 동일한 데이터로 백테스트를 돌려보고 싶다면, "
+	"아래 버튼을 눌러 투자자 시뮬레이션 페이지로 이동하세요."
+)
+
+# Streamlit 멀티페이지용 내비게이션 링크
+st.page_link(
+	"pages/02_투자자_시뮬레이션.py",  # 투자자 모드 페이지 파일 경로
+	label="투자자 시뮬레이션 페이지 열기",
+	icon="➡️",
+)
+
+
 # -------------------------------------------------------------------------
 # 5. 시각화 1: 테스트 구간 확대
 # -------------------------------------------------------------------------
@@ -394,23 +412,23 @@ st.altair_chart(chart_future, use_container_width=True)
 # -------------------------------------------------------------------------
 # 투자자 모드
 # -------------------------------------------------------------------------
-if enable_investor_mode:
-	st.subheader("💼 깐깐한 투자자 모드 결과")
+# if enable_investor_mode:
+# 	st.subheader("💼 깐깐한 투자자 모드 결과")
 
-	if st.button("가상 투자 시뮬레이션 실행"):
-		result = simulate_strict_investor(
-			test_dates=test_dates,
-			y_test=y_test,
-			y_pred=y_pred,
-			initial_balance=initial_balance,
-			fee_rate=fee_rate,
-			max_inventory=max_inventory,
-			target_margin=target_margin,
-		)
+# 	if st.button("가상 투자 시뮬레이션 실행"):
+# 		result = simulate_strict_investor(
+# 			test_dates=test_dates,
+# 			y_test=y_test,
+# 			y_pred=y_pred,
+# 			initial_balance=initial_balance,
+# 			fee_rate=fee_rate,
+# 			max_inventory=max_inventory,
+# 			target_margin=target_margin,
+# 		)
 
-		st.metric("순수익", f"{result['net_profit']:+,.0f} G")
-		st.metric("수익률 (ROI)", f"{result['roi']:+,.2f} %")
-		st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
+# 		st.metric("순수익", f"{result['net_profit']:+,.0f} G")
+# 		st.metric("수익률 (ROI)", f"{result['roi']:+,.2f} %")
+# 		st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
 
 # -------------------------------------------------------------------------
 # 8. 원시 데이터 보기
