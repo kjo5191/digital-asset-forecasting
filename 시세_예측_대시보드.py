@@ -2,6 +2,7 @@
 
 import streamlit as st
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import altair as alt
 
@@ -217,9 +218,40 @@ st.page_link(
 # -------------------------------------------------------------------------
 st.markdown("### 📈 최근 테스트 구간 확대 그래프 (인터랙티브)")
 
-# test_dates = df_ml["date"].iloc[split_idx:]
-# y_test 길이에 맞춰서 뒤에서 N개 날짜만 사용
-test_dates = df_ml["date"].iloc[-len(y_test):]
+test_len = len(y_test)
+
+test_dates = (
+	df_ml["date"]
+	.iloc[-test_len:]
+	.reset_index(drop=True)
+	.to_numpy()
+)
+
+actual = (
+	pd.Series(y_test)
+	.reset_index(drop=True)
+	.to_numpy()
+)
+
+pred = (
+	pd.Series(y_pred)
+	.reset_index(drop=True)
+	.to_numpy()
+)
+
+# test_dates = df_ml["date"].iloc[-len(y_test):]
+
+# 디버깅용
+# st.write("DEBUG lens",
+# 	"len(df_ml) =", len(df_ml),
+# 	"len(y_test) =", len(y_test),
+# 	"len(test_dates) =", len(test_dates),
+# )
+
+# st.write("DEBUG index lengths",
+# 	"test_dates index len =", len(test_dates.index),
+# 	"y_test index len =", len(getattr(y_test, "index", [])),
+# )
 
 
 if zoom_n > len(test_dates):
@@ -227,10 +259,16 @@ if zoom_n > len(test_dates):
 
 zoom_slice = slice(-zoom_n, None)
 
+# df_plot = pd.DataFrame({
+# 	"date": test_dates.iloc[zoom_slice],
+# 	"Actual (실제)": y_test.iloc[zoom_slice].values,
+# 	"Prediction (예측)": y_pred[zoom_slice]
+# })
+
 df_plot = pd.DataFrame({
-	"date": test_dates.iloc[zoom_slice],
-	"Actual (실제)": y_test.iloc[zoom_slice].values,
-	"Prediction (예측)": y_pred[zoom_slice]
+	"date": test_dates[zoom_slice],
+	"Actual (실제)": actual[zoom_slice],
+	"Prediction (예측)": pred[zoom_slice],
 })
 
 df_plot_melt = df_plot.melt("date", var_name="type", value_name="price")
@@ -270,49 +308,60 @@ st.altair_chart(chart, use_container_width=True)
 # -------------------------------------------------------------------------
 st.markdown("### 📊 전체 시세 & 수요일(Reset) 하이라이트 (인터랙티브)")
 
-all_dates = df_ml["date"]
-all_prices = df_ml["price"]
+# 1) 전체 시세 (히스토리)
+all_dates = df_ml["date"].reset_index(drop=True).to_numpy()
+all_prices = df_ml["price"].reset_index(drop=True).to_numpy()
 
 df_line_all = pd.DataFrame({
 	"date": all_dates,
 	"price": all_prices,
-	"type": "History (전체 흐름)"
+	"type": "History (전체 흐름)",
 })
 
-test_dates_full = all_dates.iloc[split_idx:]
-real_test_price = all_prices.iloc[split_idx:]
+# 2) 테스트 구간 (Actual / Prediction)
+test_len = len(y_test)
+
+test_dates_full = all_dates[-test_len:]
+real_test_price = all_prices[-test_len:]
+pred_price = np.asarray(y_pred)  # Series든 ndarray든 통일
 
 df_line_test = pd.DataFrame({
 	"date": test_dates_full,
 	"price": real_test_price,
-	"type": "Actual (검증 구간)"
+	"type": "Actual (검증 구간)",
 })
 
 df_line_pred = pd.DataFrame({
 	"date": test_dates_full,
-	"price": y_pred,
-	"type": "Prediction (예측)"
+	"price": pred_price,
+	"type": "Prediction (예측)",
 })
 
+# 하나로 합치기
 df_lines = pd.concat([df_line_all, df_line_test, df_line_pred], ignore_index=True)
 
-unique_days = df_ml["date"].dt.normalize().drop_duplicates()
+# 3) 수요일(Reset) 배경 영역 데이터
+unique_days = pd.to_datetime(df_ml["date"]).dt.normalize().drop_duplicates()
 weds = unique_days[unique_days.dt.dayofweek == 2]
 
 df_weds = pd.DataFrame({
 	"start": weds,
 	"end": weds + pd.Timedelta(days=1),
-	"label": "수요일 (Reset)"
+	"label": "수요일 (Reset)",
 })
 
-split_time = all_dates.iloc[split_idx]
+# 4) 학습/예측 분기점 (전체 길이 - test_len 기준)
+split_idx = len(all_dates) - test_len
+split_time = all_dates[split_idx]
 df_split = pd.DataFrame({"date": [split_time]})
 
+# 5) y축 범위 (전체 시세 기준)
 y_all_min = all_prices.min()
 y_all_max = all_prices.max()
 padding = (y_all_max - y_all_min) * 0.05
 y_domain = [y_all_min - padding, y_all_max + padding]
 
+# 6) Altair 레이어 구성
 rect = (
 	alt.Chart(df_weds)
 	.mark_rect()
@@ -320,7 +369,7 @@ rect = (
 		x="start:T",
 		x2="end:T",
 		color=alt.value("orange"),
-		opacity=alt.value(0.12)
+		opacity=alt.value(0.12),
 	)
 )
 
@@ -329,11 +378,7 @@ lines = (
 	.mark_line()
 	.encode(
 		x=alt.X("date:T", title="날짜"),
-		y=alt.Y(
-			"price:Q",
-			title="가격 (Gold)",
-			scale=alt.Scale(domain=y_domain)
-		),
+		y=alt.Y("price:Q", title="가격 (Gold)", scale=alt.Scale(domain=y_domain)),
 		color=alt.Color("type:N", title="구분"),
 		tooltip=[
 			alt.Tooltip("date:T", title="날짜"),
@@ -348,7 +393,7 @@ rule = (
 	.mark_rule(color="green", strokeDash=[4, 4])
 	.encode(
 		x="date:T",
-		size=alt.value(2)
+		size=alt.value(2),
 	)
 )
 
@@ -356,12 +401,13 @@ chart_all = (
 	(rect + lines + rule)
 	.properties(
 		title=f"[{top_item}] 전체 시세 & 수요일(Reset) 영향 분석",
-		height=400
+		height=400,
 	)
 	.interactive()
 )
 
 st.altair_chart(chart_all, use_container_width=True)
+
 
 # -------------------------------------------------------------------------
 # 7. 시각화 3: 히스토리 + 미래 예측

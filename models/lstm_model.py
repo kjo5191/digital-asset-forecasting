@@ -127,6 +127,7 @@ class LSTMPriceModel(BasePriceModel):
 			epochs=50,
 			batch_size=64,
 			callbacks=[early_stopping],
+			shuffle=False,
 			verbose=0,		# Streamlit 로그 과한 출력 방지
 		)
 
