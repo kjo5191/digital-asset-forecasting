@@ -6,61 +6,61 @@ from datetime import timedelta
 # =========================================================
 # 1. 원본 가격 데이터 정제 + 30분봉 변환
 # =========================================================
-def preprocess_ohlc_and_fill(df_raw: pd.DataFrame) -> pd.DataFrame:
-	"""
-	- 10분 단위 raw 가격 로그를 입력으로 받아
-	- 원본 단계에서 1차 이상치 제거
-	- 30분봉(Open/High/Low/Close/Mean)으로 변환
-	- 결측 구간 ffill/bfill 처리
-	"""
+# def preprocess_ohlc_and_fill(df_raw: pd.DataFrame) -> pd.DataFrame:
+# 	"""
+# 	- 10분 단위 raw 가격 로그를 입력으로 받아
+# 	- 원본 단계에서 1차 이상치 제거
+# 	- 30분봉(Open/High/Low/Close/Mean)으로 변환
+# 	- 결측 구간 ffill/bfill 처리
+# 	"""
 
-	df = df_raw.copy()
+# 	df = df_raw.copy()
 
-	# datetime index 설정
-	if "logged_at" in df.columns:
-		df["logged_at"] = pd.to_datetime(df["logged_at"])
-		df = df.set_index("logged_at")
+# 	# datetime index 설정
+# 	if "logged_at" in df.columns:
+# 		df["logged_at"] = pd.to_datetime(df["logged_at"])
+# 		df = df.set_index("logged_at")
 
-	# -------------------------------
-	# 1차 이상치 제거 (raw 단계)
-	# -------------------------------
-	raw_window = 432   # 약 3일
-	raw_sigma = 7
+# 	# -------------------------------
+# 	# 1차 이상치 제거 (raw 단계)
+# 	# -------------------------------
+# 	raw_window = 432   # 약 3일
+# 	raw_sigma = 7
 
-	rolling_mean = df["current_min_price"].rolling(
-		window=raw_window, center=True
-	).mean()
-	rolling_std = df["current_min_price"].rolling(
-		window=raw_window, center=True
-	).std()
+# 	rolling_mean = df["current_min_price"].rolling(
+# 		window=raw_window, center=True
+# 	).mean()
+# 	rolling_std = df["current_min_price"].rolling(
+# 		window=raw_window, center=True
+# 	).std()
 
-	upper = rolling_mean + raw_sigma * rolling_std
-	lower = rolling_mean - raw_sigma * rolling_std
+# 	upper = rolling_mean + raw_sigma * rolling_std
+# 	lower = rolling_mean - raw_sigma * rolling_std
 
-	outliers = (
-		(df["current_min_price"] > upper) |
-		(df["current_min_price"] < lower)
-	)
+# 	outliers = (
+# 		(df["current_min_price"] > upper) |
+# 		(df["current_min_price"] < lower)
+# 	)
 
-	if outliers.any():
-		df.loc[outliers, "current_min_price"] = np.nan
-		df["current_min_price"] = df["current_min_price"].interpolate(method="linear")
+# 	if outliers.any():
+# 		df.loc[outliers, "current_min_price"] = np.nan
+# 		df["current_min_price"] = df["current_min_price"].interpolate(method="linear")
 
-	# -------------------------------
-	# 30분봉 리샘플링
-	# -------------------------------
-	df_resampled = (
-		df["current_min_price"]
-		.resample("30min")
-		.agg(["first", "max", "min", "last", "mean"])
-	)
+# 	# -------------------------------
+# 	# 30분봉 리샘플링
+# 	# -------------------------------
+# 	df_resampled = (
+# 		df["current_min_price"]
+# 		.resample("30min")
+# 		.agg(["first", "max", "min", "last", "mean"])
+# 	)
 
-	df_resampled.columns = ["Open", "High", "Low", "Close", "Price_Mean"]
+# 	df_resampled.columns = ["Open", "High", "Low", "Close", "Price_Mean"]
 
-	# 결측 구간 보정
-	df_resampled = df_resampled.ffill().bfill()
+# 	# 결측 구간 보정
+# 	df_resampled = df_resampled.ffill().bfill()
 
-	return df_resampled
+# 	return df_resampled
 
 
 # =========================================================
@@ -126,3 +126,45 @@ def apply_gpt_scores(
 			df.loc[mask, score_col] = score
 
 	return df
+
+
+def resample_to_30min_for_app(df: pd.DataFrame) -> pd.DataFrame:
+	"""
+	앱에서 사용하는 df_target (date, price, name, grade, item_id ...) 를
+	30분 단위로 resample 해서 반환한다.
+
+	- price: 30분 평균
+	- 나머지 컬럼은 '마지막 값' 기준으로 채움 (이름/등급 등은 어차피 고정)
+	"""
+
+	df_res = df.copy()
+	df_res["date"] = pd.to_datetime(df_res["date"])
+
+	# 1) 숫자 컬럼(특히 price) → 30분 평균
+	price_agg = (
+		df_res
+		.set_index("date")["price"]
+		.resample("30min")
+		.mean()
+		.to_frame()
+	)
+
+	price_agg = price_agg.rename(columns={"price": "price"})
+
+	# 2) 기타 컬럼은 마지막 값 기준으로 forward-fill 후 resample 마지막 값 사용
+	other_cols = [c for c in df_res.columns if c not in ["date", "price"]]
+
+	if other_cols:
+		others = (
+			df_res
+			.set_index("date")[other_cols]
+			.resample("30min")
+			.last()
+			.ffill()
+		)
+		df_30 = price_agg.join(others, how="left")
+	else:
+		df_30 = price_agg
+
+	df_30 = df_30.reset_index()  # date 컬럼 복구
+	return df_30

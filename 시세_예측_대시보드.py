@@ -10,7 +10,14 @@ from data_loader import load_merged_data, load_gpt_scores
 from features import filter_item, make_ml_dataset
 from models.factory import get_model
 from backtest import simulate_strict_investor
-from preprocess import apply_gpt_scores	
+from preprocess import apply_gpt_scores, clean_outliers_rolling, resample_to_30min_for_app
+
+
+# -------------------------------------------------------------------------
+# 시간 해상도 설정 (30분 단위 기준)
+# -------------------------------------------------------------------------
+TIME_STEP_MINUTES = 30
+POINTS_PER_DAY = int(24 * 60 / TIME_STEP_MINUTES)  # 48
 
 
 # -------------------------------------------------------------------------
@@ -58,7 +65,7 @@ with st.sidebar:
 			value=3,
 			step=1
 		)
-		POINTS_PER_DAY = 144  # 10분 단위 기준
+
 		zoom_n = days_to_show * POINTS_PER_DAY
 
 		model_key = st.selectbox(
@@ -84,9 +91,13 @@ if run_button:
 	if result is None:
 		st.error(f"'{target_keyword}' (등급: {target_grade}) 에 해당하는 데이터가 없습니다.")
 	else:
+		# 🔹 UI용 원본 (10분)
 		df_target, top_item = result
 
-		# 🔹 1) 현재 아이템의 item_id 추출
+		# 🔥 1) 30분봉으로 변환 (ML 전용)
+		df_target_30 = resample_to_30min_for_app(df_target)
+
+		# 🔹 item_id 추출
 		item_id = None
 		if "item_id" in df_target.columns:
 			try:
@@ -94,48 +105,58 @@ if run_button:
 			except Exception:
 				item_id = None
 
-		# 🔹 2) 해당 아이템에 대한 GPT 점수만 필터링
+		# 🔹 해당 아이템에 대한 GPT 점수만 필터링
 		if item_id is not None:
 			df_gpt_item = df_gpt_all[df_gpt_all["item_id"] == item_id].copy()
 		else:
 			df_gpt_item = None
 
-		# 🔹 3) df_target에 GPT 점수 매핑
-		# apply_gpt_scores는 index가 datetime인 df를 기대하므로,
-		# 잠시 date를 index로 올려서 적용 후 다시 reset_index 한다.
-		df_target_for_ml = df_target.copy()
-		df_target_for_ml = df_target_for_ml.sort_values("date")
-		df_target_for_ml = df_target_for_ml.set_index("date")
+		# 🔹 2) GPT 점수 매핑 (date index 기준)
+		df_target_for_ml = (
+			df_target_30
+			.sort_values("date")
+			.set_index("date")
+		)
 
 		df_target_with_gpt = apply_gpt_scores(
 			df_target_for_ml,
 			df_gpt_item,
-			score_col="gpt_score"
+			score_col="gpt_score",
 		)
 
-		df_target_with_gpt = df_target_with_gpt.reset_index()	# 다시 'date' 컬럼 복구
+		# 🔹 3) 이상치 정제 (30분 기준)
+		df_target_clean = clean_outliers_rolling(
+			df_target_with_gpt,
+			column="price",
+			window=POINTS_PER_DAY,   # 하루 기준
+			sigma=3.0,
+		)
 
+		df_target_clean = df_target_clean.reset_index()
 
+		# 🔹 4) Feature Engineering
 		with st.spinner("Feature Engineering 처리 중..."):
-			df_ml, features = make_ml_dataset(df_target_with_gpt)
+			df_ml, features = make_ml_dataset(df_target_clean)
 
 		if len(df_ml) < 300:
-			st.warning(f"Feature 생성 후 데이터가 {len(df_ml)}개입니다. (최소 300개 이상일 때가 더 안정적)")
+			st.warning(
+				f"Feature 생성 후 데이터가 {len(df_ml)}개입니다. "
+				"(최소 300개 이상일 때가 더 안정적)"
+			)
 		else:
 			with st.spinner("학습 및 예측 중..."):
 				price_model = get_model(model_key)
 				price_model.train(df_ml, features)
 
 				y_test, y_pred, split_idx, rmse, r2 = price_model.predict_test()
-				# future_df = price_model.predict_future(steps=144)
 				try:
-					future_df = price_model.predict_future(steps=144)
+					future_df = price_model.predict_future(steps=POINTS_PER_DAY)
 				except NotImplementedError:
 					future_df = None
 
 			st.session_state.rf_result = {
-				"df_target": df_target,
-				"df_ml": df_ml,
+				"df_target": df_target,     # UI용 (10분)
+				"df_ml": df_ml,             # ML용 (30분)
 				"top_item": top_item,
 				"y_test": y_test,
 				"y_pred": y_pred,
@@ -145,6 +166,7 @@ if run_button:
 				"days_to_show": days_to_show,
 				"future_df": future_df,
 			}
+
 
 # -------------------------------------------------------------------------
 # 3. 세션에 결과 없으면 안내 후 종료
@@ -168,7 +190,7 @@ rmse = res["rmse"]
 r2 = res["r2"]
 days_to_show = res["days_to_show"]
 future_df = res["future_df"]
-zoom_n = days_to_show * 144
+zoom_n = days_to_show * POINTS_PER_DAY
 
 st.subheader(f"🎯 분석 대상: {top_item}")
 
@@ -275,12 +297,6 @@ if zoom_n > len(test_dates):
 	zoom_n = len(test_dates)
 
 zoom_slice = slice(-zoom_n, None)
-
-# df_plot = pd.DataFrame({
-# 	"date": test_dates.iloc[zoom_slice],
-# 	"Actual (실제)": y_test.iloc[zoom_slice].values,
-# 	"Prediction (예측)": y_pred[zoom_slice]
-# })
 
 df_plot = pd.DataFrame({
 	"date": test_dates[zoom_slice],
@@ -475,28 +491,6 @@ else:
 
 
 # -------------------------------------------------------------------------
-# 투자자 모드
-# -------------------------------------------------------------------------
-# if enable_investor_mode:
-# 	st.subheader("💼 깐깐한 투자자 모드 결과")
-
-# 	if st.button("가상 투자 시뮬레이션 실행"):
-# 		result = simulate_strict_investor(
-# 			test_dates=test_dates,
-# 			y_test=y_test,
-# 			y_pred=y_pred,
-# 			initial_balance=initial_balance,
-# 			fee_rate=fee_rate,
-# 			max_inventory=max_inventory,
-# 			target_margin=target_margin,
-# 		)
-
-# 		st.metric("순수익", f"{result['net_profit']:+,.0f} G")
-# 		st.metric("수익률 (ROI)", f"{result['roi']:+,.2f} %")
-# 		st.metric("최종 자산 가치", f"{result['final_asset_value']:,.0f} G")
-
-
-# -------------------------------------------------------------------------
 # 8. 원시 데이터 보기
 # -------------------------------------------------------------------------
 with st.expander("원시 데이터 / Feature 데이터 확인"):
@@ -504,4 +498,4 @@ with st.expander("원시 데이터 / Feature 데이터 확인"):
 	st.dataframe(df_target[["date", "name", "grade", "price"]].tail(50))
 
 	st.markdown("#### 🔹 ML 학습용 데이터 (df_ml)")
-	st.dataframe(df_ml[["date", "price", "lag_10m", "rsi", "is_overbought", "is_oversold"]].tail(50))
+	st.dataframe(df_ml[["date", "price", "lag_30m", "rsi", "is_overbought", "is_oversold"]].tail(50))
