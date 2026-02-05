@@ -4,7 +4,7 @@ import numpy as np
 from datetime import timedelta
 
 # =========================================================
-# 1. 원본 가격 데이터 정제 + 30분봉 변환
+# 1. 원본 가격 데이터 정제 + 30분봉 변환	# 사용 안함
 # =========================================================
 # def preprocess_ohlc_and_fill(df_raw: pd.DataFrame) -> pd.DataFrame:
 # 	"""

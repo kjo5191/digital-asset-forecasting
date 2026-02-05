@@ -9,6 +9,7 @@ import altair as alt
 from data_loader import load_merged_data, load_gpt_scores
 from features import filter_item, make_ml_dataset
 from models.factory import get_model
+from models.io import load_or_train_model
 from backtest import simulate_strict_investor
 from preprocess import apply_gpt_scores, clean_outliers_rolling, resample_to_30min_for_app
 
@@ -32,7 +33,7 @@ if "rf_result" not in st.session_state:
 	st.session_state.rf_result = None
 
 st.title("디지털 자산 시세 변동 예측 모델")
-st.caption("로스트아크 거래소 아이템 시세 예측 (RandomForest 예시 버전)")
+st.caption("로스트아크 거래소 아이템 시세를 여러 모델(RandomForest / LightGBM / LSTM / NeuralProphet)로 예측합니다.")
 
 # -------------------------------------------------------------------------
 # 1. 사이드바 - 검색/학습 설정 (폼 + Enter 제출)
@@ -146,8 +147,19 @@ if run_button:
 			)
 		else:
 			with st.spinner("학습 및 예측 중..."):
-				price_model = get_model(model_key)
-				price_model.train(df_ml, features)
+				# price_model = get_model(model_key)
+				# price_model.train(df_ml, features)
+				price_model, model_status = load_or_train_model(
+					model_key=model_key,
+					item_id=item_id,
+					df_ml=df_ml,
+					features=features,
+				)				
+
+				if model_status == "loaded":
+					st.info("📦 저장된 모델을 불러와 예측했습니다.")
+				else:
+					st.success("🧠 새로운 모델을 학습하고 저장했습니다.")
 
 				y_test, y_pred, split_idx, rmse, r2 = price_model.predict_test()
 				try:
@@ -157,7 +169,7 @@ if run_button:
 
 			st.session_state.rf_result = {
 				"df_target": df_target,     # UI용 (10분)
-				"df_ml": df_ml,             # ML용 (30분)
+				"df_ml": df_ml,             # ML용 (30분, gpt_score 포함 가능)
 				"top_item": top_item,
 				"y_test": y_test,
 				"y_pred": y_pred,
@@ -166,6 +178,7 @@ if run_button:
 				"r2": r2,
 				"days_to_show": days_to_show,
 				"future_df": future_df,
+				"features": features,
 			}
 
 
@@ -198,13 +211,10 @@ st.subheader(f"🎯 분석 대상: {top_item}")
 # -----------------------------
 # 현재 가격 & 전일 평균 가격
 # -----------------------------
-# 1) 가장 최근 시점(현재 가격)
 latest_ts = df_target["date"].max()
 latest_row = df_target.loc[df_target["date"] == latest_ts].iloc[-1]
 current_price = float(latest_row["price"])
 
-# 2) 전일 평균 가격 계산
-#    - 현재 시점 날짜의 전날 0시 ~ 당일 0시 직전
 current_day_start = latest_ts.normalize()  # 당일 00:00
 prev_day_start = current_day_start - pd.Timedelta(days=1)
 prev_day_end = current_day_start          # 전날 23:59:59까지
@@ -245,9 +255,8 @@ st.caption(
 	"아래 버튼을 눌러 투자 시뮬레이션 페이지로 이동하세요."
 )
 
-# Streamlit 멀티페이지용 내비게이션 링크
 st.page_link(
-	"pages/투자_시뮬레이션.py",  # 투자 모드 페이지 파일 경로
+	"pages/투자_시뮬레이션.py",
 	label="투자 시뮬레이션 페이지 열기",
 	icon="➡️",
 )
@@ -278,21 +287,6 @@ pred = (
 	.reset_index(drop=True)
 	.to_numpy()
 )
-
-# test_dates = df_ml["date"].iloc[-len(y_test):]
-
-# 디버깅용
-# st.write("DEBUG lens",
-# 	"len(df_ml) =", len(df_ml),
-# 	"len(y_test) =", len(y_test),
-# 	"len(test_dates) =", len(test_dates),
-# )
-
-# st.write("DEBUG index lengths",
-# 	"test_dates index len =", len(test_dates.index),
-# 	"y_test index len =", len(getattr(y_test, "index", [])),
-# )
-
 
 if zoom_n > len(test_dates):
 	zoom_n = len(test_dates)
@@ -342,7 +336,6 @@ st.altair_chart(chart, use_container_width=True)
 # -------------------------------------------------------------------------
 st.markdown("### 📊 전체 시세 & 수요일(Reset) 하이라이트 (인터랙티브)")
 
-# 1) 전체 시세 (히스토리)
 all_dates = df_ml["date"].reset_index(drop=True).to_numpy()
 all_prices = df_ml["price"].reset_index(drop=True).to_numpy()
 
@@ -352,12 +345,11 @@ df_line_all = pd.DataFrame({
 	"type": "History (전체 흐름)",
 })
 
-# 2) 테스트 구간 (Actual / Prediction)
 test_len = len(y_test)
 
 test_dates_full = all_dates[-test_len:]
 real_test_price = all_prices[-test_len:]
-pred_price = np.asarray(y_pred)  # Series든 ndarray든 통일
+pred_price = np.asarray(y_pred)
 
 df_line_test = pd.DataFrame({
 	"date": test_dates_full,
@@ -371,10 +363,8 @@ df_line_pred = pd.DataFrame({
 	"type": "Prediction (예측)",
 })
 
-# 하나로 합치기
 df_lines = pd.concat([df_line_all, df_line_test, df_line_pred], ignore_index=True)
 
-# 3) 수요일(Reset) 배경 영역 데이터
 unique_days = pd.to_datetime(df_ml["date"]).dt.normalize().drop_duplicates()
 weds = unique_days[unique_days.dt.dayofweek == 2]
 
@@ -384,18 +374,15 @@ df_weds = pd.DataFrame({
 	"label": "수요일 (Reset)",
 })
 
-# 4) 학습/예측 분기점 (전체 길이 - test_len 기준)
 split_idx = len(all_dates) - test_len
 split_time = all_dates[split_idx]
 df_split = pd.DataFrame({"date": [split_time]})
 
-# 5) y축 범위 (전체 시세 기준)
 y_all_min = all_prices.min()
 y_all_max = all_prices.max()
 padding = (y_all_max - y_all_min) * 0.05
 y_domain = [y_all_min - padding, y_all_max + padding]
 
-# 6) Altair 레이어 구성
 rect = (
 	alt.Chart(df_weds)
 	.mark_rect()
@@ -451,7 +438,6 @@ st.markdown("### 🔮 향후 1일 시세 예측 (히스토리 + 미래)")
 if future_df is None or future_df.empty:
 	st.info("현재 선택한 모델에서는 미래 예측(predict_future)이 구현되지 않았습니다.")
 else:
-	# 최근 구간 히스토리 (같은 zoom_n 사용)
 	hist_tail = df_ml[["date", "price"]].iloc[-zoom_n:].copy()
 	hist_tail["type"] = "History"
 
@@ -499,4 +485,8 @@ with st.expander("원시 데이터 / Feature 데이터 확인"):
 	st.dataframe(df_target[["date", "name", "grade", "price"]].tail(50))
 
 	st.markdown("#### 🔹 ML 학습용 데이터 (df_ml)")
-	st.dataframe(df_ml[["date", "price", "lag_30m", "rsi", "is_overbought", "is_oversold"]].tail(50))
+	base_cols = ["date", "price", "lag_30m", "rsi", "is_overbought", "is_oversold"]
+	if "gpt_score" in df_ml.columns:
+		base_cols.append("gpt_score")
+
+	st.dataframe(df_ml[base_cols].tail(50))
