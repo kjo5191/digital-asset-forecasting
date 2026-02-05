@@ -65,4 +65,8 @@ def make_ml_dataset(df_target: pd.DataFrame):
 		"hour", "day_of_week"
 	]
 
+	# 🔹 GPT 점수 컬럼이 있으면 feature에 추가
+	if "gpt_score" in df_ml.columns:
+		features.append("gpt_score")
+
 	return df_ml, features

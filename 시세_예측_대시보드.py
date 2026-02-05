@@ -6,11 +6,12 @@ import numpy as np
 import pandas as pd
 import altair as alt
 
-from data_loader import load_merged_data
+from data_loader import load_merged_data, load_gpt_scores
 from features import filter_item, make_ml_dataset
-# from models_old import train_random_forest, forecast_future
 from models.factory import get_model
 from backtest import simulate_strict_investor
+from preprocess import apply_gpt_scores	
+
 
 # -------------------------------------------------------------------------
 # 0. 페이지 설정 & 세션 초기화
@@ -33,6 +34,7 @@ with st.sidebar:
 	st.header("검색 / 학습 설정")
 
 	df_final = load_merged_data()
+	df_gpt_all = load_gpt_scores()
 
 	grade_list = sorted(df_final["grade"].dropna().unique())
 	grade_options = ["전체"] + grade_list
@@ -84,28 +86,43 @@ if run_button:
 	else:
 		df_target, top_item = result
 
+		# 🔹 1) 현재 아이템의 item_id 추출
+		item_id = None
+		if "item_id" in df_target.columns:
+			try:
+				item_id = int(df_target["item_id"].iloc[0])
+			except Exception:
+				item_id = None
+
+		# 🔹 2) 해당 아이템에 대한 GPT 점수만 필터링
+		if item_id is not None:
+			df_gpt_item = df_gpt_all[df_gpt_all["item_id"] == item_id].copy()
+		else:
+			df_gpt_item = None
+
+		# 🔹 3) df_target에 GPT 점수 매핑
+		# apply_gpt_scores는 index가 datetime인 df를 기대하므로,
+		# 잠시 date를 index로 올려서 적용 후 다시 reset_index 한다.
+		df_target_for_ml = df_target.copy()
+		df_target_for_ml = df_target_for_ml.sort_values("date")
+		df_target_for_ml = df_target_for_ml.set_index("date")
+
+		df_target_with_gpt = apply_gpt_scores(
+			df_target_for_ml,
+			df_gpt_item,
+			score_col="gpt_score"
+		)
+
+		df_target_with_gpt = df_target_with_gpt.reset_index()	# 다시 'date' 컬럼 복구
+
+
 		with st.spinner("Feature Engineering 처리 중..."):
-			df_ml, features = make_ml_dataset(df_target)
+			df_ml, features = make_ml_dataset(df_target_with_gpt)
 
 		if len(df_ml) < 300:
 			st.warning(f"Feature 생성 후 데이터가 {len(df_ml)}개입니다. (최소 300개 이상일 때가 더 안정적)")
 		else:
 			with st.spinner("학습 및 예측 중..."):
-				# model, y_test, y_pred, split_idx, rmse, r2 = train_random_forest(df_ml, features)
-
-				# # 🔮 미래 예측 (예: 1일 = 144 스텝)
-				# future_steps = 144
-				# future_df = forecast_future(model, df_ml, features, steps=future_steps)
-
-				# model_key = st.sidebar.selectbox(
-				# 	"모델 선택",
-				# 	["rf", "lgbm", "lstm"],
-				# 	format_func=lambda k: {
-				# 		"rf": "RandomForest",
-				# 		"lgbm": "LightGBM",
-				# 		"lstm": "LSTM",
-				# 	}[k],
-				# )
 				price_model = get_model(model_key)
 				price_model.train(df_ml, features)
 
