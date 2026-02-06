@@ -15,6 +15,10 @@ venv/
 lightning_logs/
 trained_models/
 
+# Local data / backups
+data/
+*.csv
+
 # 기타
 .env
 .DS_Store
