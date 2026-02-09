@@ -58,6 +58,7 @@ LOSTARK-PRICE-APP/
 ├─ .gitignore                 # Git 제외 대상 정의
 ├─ requirements.txt           # Python 의존성 목록
 └─ README.md                  # 프로젝트 설명 문서
+```
 
 
 ---
