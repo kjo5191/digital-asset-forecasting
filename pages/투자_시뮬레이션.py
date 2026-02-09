@@ -2,7 +2,9 @@
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 
+from ai_advisor import get_ai_advice
 from data_loader import load_merged_data
 from features import filter_item, make_ml_dataset
 # from models_old import train_random_forest
@@ -220,124 +222,213 @@ else:
 # -------------------------------------------------------------------------
 # 📌 현재 전략 기준 투자 판단 (세션 기반)
 # -------------------------------------------------------------------------
-st.subheader("📌 현재 전략 기준 투자 판단")
+# st.subheader("📌 현재 전략 기준 투자 판단")
 
 # 세션 결과를 사용하는 경우에만 디테일한 의견 제공
+# if use_session and has_session_result:
+# 	res = st.session_state.rf_result
+
+# 	df_target = res["df_target"]
+# 	top_item = res["top_item"]
+# 	future_df = res.get("future_df", None)
+
+# 	prices = df_target["price"].reset_index(drop=True)
+
+# 	# 현재 가격
+# 	if len(prices) == 0:
+# 		st.info("시세 데이터가 부족해서 현재 의견을 계산할 수 없습니다.")
+# 	else:
+# 		current_price = float(prices.iloc[-1])
+
+# 		# 1) 단기/장기 이동평균 기반 추세 계산
+# 		WINDOW_SHORT = 144		# 1일 (10분 단위 * 144)
+# 		WINDOW_LONG = 288		# 2일
+
+# 		trend_label = "데이터 부족"
+# 		trend_score = 0.0
+
+# 		if len(prices) >= WINDOW_SHORT:
+# 			short_window = min(WINDOW_SHORT, len(prices))
+# 			short_ma = prices.iloc[-short_window:].mean()
+
+# 			if len(prices) >= WINDOW_LONG:
+# 				long_ma = prices.iloc[-WINDOW_LONG:].mean()
+# 			else:
+# 				# 데이터가 부족하면 전체 평균을 장기 기준으로 사용
+# 				long_ma = prices.mean()
+
+# 			if long_ma > 0:
+# 				trend_score = (short_ma - long_ma) / long_ma
+# 			else:
+# 				trend_score = 0.0
+
+# 			if trend_score > 0.03:
+# 				trend_label = "상승 추세"
+# 			elif trend_score < -0.03:
+# 				trend_label = "하락 추세"
+# 			else:
+# 				trend_label = "횡보"
+# 		else:
+# 			trend_label = "데이터 부족"
+# 			trend_score = 0.0
+
+# 		# 2) 모델 기준 향후 1일 기대 수익률 (future_df 기반)
+# 		expected_return = None
+
+# 		if future_df is not None and not future_df.empty:
+# 			if "price" in future_df.columns:
+# 				future_prices = future_df["price"]
+# 			else:
+# 				# 혹시 컬럼명이 다르면 숫자형 첫 컬럼 사용
+# 				future_prices = future_df.select_dtypes("number").iloc[:, 0]
+
+# 			horizon = min(144, len(future_prices))	# 1일(144포인트) 또는 그 이하
+# 			if horizon > 0 and current_price > 0:
+# 				future_mean = future_prices.iloc[:horizon].mean()
+# 				expected_return = (future_mean - current_price) / current_price
+
+# 		# 3) 최종 매수/관망/비추천 판단
+# 		if expected_return is None or trend_label == "데이터 부족":
+# 			signal = "판단 보류"
+# 			reason = "데이터가 부족하거나 미래 예측 정보가 없어서 뚜렷한 의견을 내기 어렵습니다."
+# 		else:
+# 			# 🔧 임계값은 나중에 같이 튜닝 가능
+# 			if expected_return >= 0.08 and trend_score > 0.03:
+# 				signal = "매수 추천"
+# 				reason = (
+# 					"단기 상승 추세이고, 모델 기준 향후 1일 기대 수익률이 8% 이상입니다. "
+# 					"다만 실제 거래에서는 분할 매수를 고려하는 것이 안전합니다."
+# 				)
+# 			elif expected_return <= -0.02 and trend_score < -0.03:
+# 				signal = "매수 비추천"
+# 				reason = (
+# 					"하락 추세이며, 모델이 단기적으로 수익을 기대하지 않습니다. "
+# 					"당분간 관망하는 편이 더 안전해 보입니다."
+# 				)
+# 			else:
+# 				signal = "관망"
+# 				reason = (
+# 					"추세와 기대 수익률이 애매한 구간입니다. "
+# 					"지금은 과도한 진입보다는 추세를 조금 더 지켜보는 것을 권장합니다."
+# 				)
+
+# 		sig_col1, sig_col2, sig_col3 = st.columns(3)
+
+# 		with sig_col1:
+# 			st.metric("투자 의견", signal)
+
+# 		with sig_col2:
+# 			if expected_return is not None:
+# 				st.metric(
+# 					"향후 1일 기대 수익률",
+# 					f"{expected_return * 100:+.2f} %",
+# 				)
+
+# 		with sig_col3:
+# 			if trend_label != "데이터 부족":
+# 				st.metric(
+# 					"단기 추세",
+# 					trend_label,
+# 					f"{trend_score * 100:+.2f} %",
+# 				)
+
+# 		st.caption(
+# 			"※ 본 의견은 과거 시세와 단기 예측을 기반으로 한 참고용 정보이며, "
+# 			"실제 게임 내 거래 결정에 따른 책임은 플레이어 본인에게 있습니다."
+# 		)
+
+# else:
+# 	# 세션을 사용하지 않는 경우엔, 과감히 판단 보류만 표기
+# 	st.info(
+# 		"현재 전략 기준 투자 의견은 메인 대시보드에서 먼저 학습을 실행한 뒤, "
+# 		"'메인 페이지 결과 사용' 옵션으로 시뮬레이션할 때 제공됩니다."
+# 	)
+
+# -------------------------------------------------------------------------
+# 4. AI 투자 전략 가이드
+# -------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("📊 AI 투자 전략 가이드")
+
+# 메인 대시보드에서 학습한 결과를 사용할 때만 AI 가이드 제공
 if use_session and has_session_result:
 	res = st.session_state.rf_result
 
 	df_target = res["df_target"]
 	top_item = res["top_item"]
-	future_df = res.get("future_df", None)
+	future_df_ensemble = res.get("future_df_ensemble", None)
 
-	prices = df_target["price"].reset_index(drop=True)
-
-	# 현재 가격
-	if len(prices) == 0:
-		st.info("시세 데이터가 부족해서 현재 의견을 계산할 수 없습니다.")
+	# 데이터 체크
+	if df_target is None or df_target.empty:
+		st.info("시세 데이터가 부족해서 AI 가이드를 생성할 수 없습니다.")
+	elif future_df_ensemble is None or future_df_ensemble.empty:
+		st.info("미래 예측 데이터가 없어 AI 가이드를 생성할 수 없습니다.")
 	else:
-		current_price = float(prices.iloc[-1])
+		# 현재 가격
+		current_price = float(df_target["price"].iloc[-1])
 
-		# 1) 단기/장기 이동평균 기반 추세 계산
-		WINDOW_SHORT = 144		# 1일 (10분 단위 * 144)
-		WINDOW_LONG = 288		# 2일
+		# 🔹 ai_advisor.py 형식(df_forecast: ds, forecast)으로 변환
+		df_forecast = future_df_ensemble.copy()
 
-		trend_label = "데이터 부족"
-		trend_score = 0.0
+		rename_map = {}
+		if "date" in df_forecast.columns:
+			rename_map["date"] = "ds"
+		if "ensemble_price" in df_forecast.columns:
+			rename_map["ensemble_price"] = "forecast"
 
-		if len(prices) >= WINDOW_SHORT:
-			short_window = min(WINDOW_SHORT, len(prices))
-			short_ma = prices.iloc[-short_window:].mean()
+		df_forecast = df_forecast.rename(columns=rename_map)
 
-			if len(prices) >= WINDOW_LONG:
-				long_ma = prices.iloc[-WINDOW_LONG:].mean()
-			else:
-				# 데이터가 부족하면 전체 평균을 장기 기준으로 사용
-				long_ma = prices.mean()
-
-			if long_ma > 0:
-				trend_score = (short_ma - long_ma) / long_ma
-			else:
-				trend_score = 0.0
-
-			if trend_score > 0.03:
-				trend_label = "상승 추세"
-			elif trend_score < -0.03:
-				trend_label = "하락 추세"
-			else:
-				trend_label = "횡보"
+		if "ds" not in df_forecast.columns or "forecast" not in df_forecast.columns:
+			st.warning("AI 가이드를 생성하기 위한 'ds' / 'forecast' 컬럼이 없습니다.")
 		else:
-			trend_label = "데이터 부족"
-			trend_score = 0.0
+			# 예측 최저/최고 (앙상블 forecast 기준)
+			min_pred = int(df_forecast["forecast"].min())
+			max_pred = int(df_forecast["forecast"].max())
 
-		# 2) 모델 기준 향후 1일 기대 수익률 (future_df 기반)
-		expected_return = None
+			# 🔹 AI 응답 캐시 (아이템 단위)
+			if "ai_advice_cache" not in st.session_state:
+				st.session_state.ai_advice_cache = {}
 
-		if future_df is not None and not future_df.empty:
-			if "price" in future_df.columns:
-				future_prices = future_df["price"]
-			else:
-				# 혹시 컬럼명이 다르면 숫자형 첫 컬럼 사용
-				future_prices = future_df.select_dtypes("number").iloc[:, 0]
+			cache_key = top_item
+			if cache_key not in st.session_state.ai_advice_cache:
+				with st.spinner("AI 전략 분석 중..."):
+					# ai_advisor.py 시그니처에 맞게 전달
+					advice_text = get_ai_advice(
+						top_item,
+						current_price,
+						df_forecast,
+					)
+					st.session_state.ai_advice_cache[cache_key] = advice_text
 
-			horizon = min(144, len(future_prices))	# 1일(144포인트) 또는 그 이하
-			if horizon > 0 and current_price > 0:
-				future_mean = future_prices.iloc[:horizon].mean()
-				expected_return = (future_mean - current_price) / current_price
+			cached_advice = st.session_state.ai_advice_cache[cache_key]
 
-		# 3) 최종 매수/관망/비추천 판단
-		if expected_return is None or trend_label == "데이터 부족":
-			signal = "판단 보류"
-			reason = "데이터가 부족하거나 미래 예측 정보가 없어서 뚜렷한 의견을 내기 어렵습니다."
-		else:
-			# 🔧 임계값은 나중에 같이 튜닝 가능
-			if expected_return >= 0.08 and trend_score > 0.03:
-				signal = "매수 추천"
-				reason = (
-					"단기 상승 추세이고, 모델 기준 향후 1일 기대 수익률이 8% 이상입니다. "
-					"다만 실제 거래에서는 분할 매수를 고려하는 것이 안전합니다."
-				)
-			elif expected_return <= -0.02 and trend_score < -0.03:
-				signal = "매수 비추천"
-				reason = (
-					"하락 추세이며, 모델이 단기적으로 수익을 기대하지 않습니다. "
-					"당분간 관망하는 편이 더 안전해 보입니다."
-				)
-			else:
-				signal = "관망"
-				reason = (
-					"추세와 기대 수익률이 애매한 구간입니다. "
-					"지금은 과도한 진입보다는 추세를 조금 더 지켜보는 것을 권장합니다."
-				)
-
-		sig_col1, sig_col2, sig_col3 = st.columns(3)
-
-		with sig_col1:
-			st.metric("투자 의견", signal)
-
-		with sig_col2:
-			if expected_return is not None:
+			# 🔹 메트릭 + AI 텍스트 출력
+			c1, c2, c3 = st.columns(3)
+			with c1:
+				st.metric("현재 시세", f"{current_price:,.0f} G")
+			with c2:
 				st.metric(
-					"향후 1일 기대 수익률",
-					f"{expected_return * 100:+.2f} %",
+					"예측 최저",
+					f"{min_pred:,.0f} G",
+					delta=f"{min_pred - current_price:,.0f} G",
+					delta_color="inverse",
 				)
-
-		with sig_col3:
-			if trend_label != "데이터 부족":
+			with c3:
 				st.metric(
-					"단기 추세",
-					trend_label,
-					f"{trend_score * 100:+.2f} %",
+					"예측 최고",
+					f"{max_pred:,.0f} G",
+					delta=f"{max_pred - current_price:,.0f} G",
 				)
 
-		st.caption(
-			"※ 본 의견은 과거 시세와 단기 예측을 기반으로 한 참고용 정보이며, "
-			"실제 게임 내 거래 결정에 따른 책임은 플레이어 본인에게 있습니다."
-		)
+			st.info(cached_advice, icon="📊")
+			st.caption(
+				"※ 본 AI 가이드는 과거 시세와 예측 결과를 바탕으로 생성된 참고용 의견이며, "
+				"실제 게임 내 거래 결정에 따른 책임은 플레이어 본인에게 있습니다."
+			)
 
 else:
-	# 세션을 사용하지 않는 경우엔, 과감히 판단 보류만 표기
+	# 메인 결과를 사용하지 않는 경우엔 AI 가이드 비활성화
 	st.info(
-		"현재 전략 기준 투자 의견은 메인 대시보드에서 먼저 학습을 실행한 뒤, "
+		"AI 투자 전략 가이드는 메인 대시보드에서 먼저 학습을 실행하고, "
 		"'메인 페이지 결과 사용' 옵션으로 시뮬레이션할 때 제공됩니다."
 	)
